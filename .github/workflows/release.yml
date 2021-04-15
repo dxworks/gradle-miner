@@ -1,0 +1,47 @@
+on:
+  push:
+    tags:
+      - 'v*'
+
+name: Upload Release Asset
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: Build
+        run: mvn clean install
+      - name: Prepare Assets
+        run: |
+          mkdir gradle-miner
+          mkdir gradle-miner/results
+          cp README.md gradle-miner/README.md
+          cp target/grami.jar gradle-miner/grami.jar
+          cp bin/grami.sh gradle-miner/grami.sh
+          cp bin/grami.bat gradle-miner/grami.bat
+          chmod +x gradle-miner/grami.sh
+      - name: Create Archive
+        run: zip -r gradle-miner.zip gradle-miner
+      - name: Create Release
+        id: create_release
+        uses: actions/create-release@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tag_name: ${{ github.ref }}
+          release_name: Gradle Miner ${{ github.ref }}
+          draft: false
+          prerelease: false
+      - name: Upload Release Asset
+        id: upload-release-asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./gradle-miner.zip
+          asset_name: gradle-miner.zip
+          asset_content_type: application/zip
