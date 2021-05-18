@@ -5,17 +5,13 @@ import com.fasterxml.jackson.annotation.JsonProperty
 import com.fasterxml.jackson.module.kotlin.jacksonObjectMapper
 import org.codehaus.groovy.ast.builder.AstBuilder
 import org.codehaus.groovy.control.CompilationFailedException
+import org.codehaus.groovy.control.CompilePhase
 import java.io.File
-import java.nio.file.Files
 import java.nio.file.Path
-import kotlin.io.path.ExperimentalPathApi
-import kotlin.io.path.isRegularFile
-import kotlin.io.path.name
-import kotlin.io.path.readText
-import kotlin.streams.toList
 
 
-@ExperimentalPathApi
+lateinit var baseFolder: File
+
 fun main(args: Array<String>) {
     if (args.size != 1) {
         throw IllegalArgumentException("Bad arguments! Please provide only one argument, namely the path to the folder containing the source code.")
@@ -23,24 +19,23 @@ fun main(args: Array<String>) {
 
     val baseFolderArg = args[0]
 
-    val baseFolder = File(baseFolderArg)
+    baseFolder = File(baseFolderArg)
 
     println("Starting GraMi (Gradle Miner)\n")
     println("Reading Files...")
 
-    val baseFolderPath = baseFolder.toPath()
-    val buildFiles = Files.walk(baseFolderPath)
-            .filter { it.isRegularFile() }
-            .filter { it.name == "build.gradle" }
-            .toList()
+    val buildFiles = baseFolder.walk()
+        .filter { it.isFile }
+        .filter { it.name == "build.gradle" }
+        .toList()
 
     val astBuilder = AstBuilder()
 
     val gradleProjects = buildFiles.mapNotNull { buildFile ->
         try {
-            val nodes = astBuilder.buildFromString(buildFile.readText())
+            val nodes = astBuilder.buildFromString(CompilePhase.CONVERSION, buildFile.readText())
 
-            val visitor = FindDependencyVisitor()
+            val visitor = DependenciesVisitor(buildFile)
 
             for (n in nodes) {
                 n.visit(visitor)
@@ -68,29 +63,29 @@ fun main(args: Array<String>) {
 
     println("Exporting Inspector Lib results to $inspectorLibPath")
     jacksonObjectMapper().writerWithDefaultPrettyPrinter().writeValue(inspectorLibPath.toFile(), gradleProjects
-            .map { it.dependencies }
-            .flatten()
-            .map { it.toInspectorLibDependency() }
-            .distinct())
+        .map { it.dependencies }
+        .flatten()
+        .map { it.toInspectorLibDependency() }
+        .distinct())
 
     println("\nGraMi (Gradle Miner) finished successfully! Please view your results in the ./results directory")
 
 }
 
 data class GradleProject(
-        val id: GradleProjectId,
-        @JsonIgnore
-        var path: Path?,
-        var dependencies: List<GradleDependency> = ArrayList(),
+    val id: GradleProjectId,
+    @JsonIgnore
+    var path: File?,
+    var dependencies: List<GradleDependency> = ArrayList(),
 ) {
     @JsonProperty("path")
-    var relativePath = path?.toString()
+    var relativePath = path?.relativeTo(baseFolder)
 }
 
 class GradleProjectId(
-        val group: String?,
-        val name: String?,
-        val version: String?,
+    val group: String?,
+    val name: String?,
+    val version: String?,
 ) {
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -112,10 +107,10 @@ class GradleProjectId(
 }
 
 data class GradleDependency(
-        val group: String?,
-        val name: String,
-        val version: String?,
-        val scope: String = "implementation"
+    val group: String?,
+    val name: String?,
+    val version: String?,
+    val scope: String = "implementation"
 ) {
     fun toInspectorLibDependency() = InspectorLibDependency("$group:$name", version)
 }
